@@ -1,0 +1,4 @@
+mpremote==1.29.0
+mpy-cross==1.29.0.post2
+pillow==11.3.0
+imageio-ffmpeg==0.6.0

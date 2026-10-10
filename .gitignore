@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.DS_Store
+software/.venv/
+software/build/
+software/emulator/out/
+software/games/*/tools/out/
+*.wav
+*.gif
+*.mp4
+jade_sun_save.json*
