@@ -4,7 +4,9 @@ A pocket games console built from a Raspberry Pi RP2350 and Pimoroni parts, with
 
 ![Fluffpad running La-Fluff-Puff and the Jade Sun](hardware/photos/fluffpad_jade_sun.jpg)
 
-[![Fluffpad video](https://img.youtube.com/vi/FbvHK67HQnU/hqdefault.jpg)](https://youtu.be/FbvHK67HQnU)
+[![LA-FLUFF-PUFF and the JADE SUN v1.0.1](https://img.youtube.com/vi/FbvHK67HQnU/hqdefault.jpg)](https://youtu.be/FbvHK67HQnU)
+
+Playthrough: [LA-FLUFF-PUFF and the JADE SUN v1.0.1](https://youtu.be/FbvHK67HQnU)
 
 ## Games
 
@@ -19,9 +21,11 @@ Each game's version is `__version__` in its package `__init__.py` (Jade Sun, Pla
 
 ### La-Fluff-Puff and the Jade Sun
 
-![Jade Sun rainforest](documentation/screenshots/jade_sun_rainforest.png) ![Jade Sun boss](documentation/screenshots/jade_sun_storm_peak.png)
+![Ceiba Village](documentation/screenshots/jade_sun_v101_rainforest.png) ![Ikal at Storm Peak](documentation/screenshots/jade_sun_v101_storm_peak.png)
 
-Restore the Jade Sun across 54 rooms, six zones and five bosses inspired by Maya myth. Design notes and world map: [documentation/jade_sun_design.md](documentation/jade_sun_design.md).
+![Jade Sun world map](documentation/screenshots/jade_sun_v101_world.png)
+
+World map of all 54 rooms. Restore the Jade Sun across six zones and five bosses inspired by Maya myth. Design notes: [documentation/jade_sun_design.md](documentation/jade_sun_design.md).
 
 | Input | Action |
 | --- | --- |
