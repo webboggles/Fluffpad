@@ -4,6 +4,7 @@ Usage:
   .venv/bin/python games/jade_sun/tools/playthrough.py [out.mp4]   (from software/)
 """
 import array
+import json
 import os
 import random
 import subprocess
@@ -45,26 +46,25 @@ W, H = 960, 720
 FPS = 25
 RATE = 22050
 SAMPLES = RATE // FPS
+
+
+def _room(key, val):
+    return next(r for r in sorted(ROOMS) if val in ROOMS[r].get(key, ()))
+
+
+BOSS_HOME = {m["boss"]: r for r, m in ROOMS.items() if m.get("boss")}
+WATCH_ROOMS = sorted(r for r, m in ROOMS.items() if m.get("watcher") and "Z" in "".join(m["map"]))
 GOALS = [
     ("wait", "blade"),
-    ("go", "A2"), ("go", "B1"), ("go", "B2"),
-    ("talk", "chaac", "pearl"),
-    ("go", "B1"), ("go", "B3"), ("go", "B4"),
-    ("boss", "xoc", "g_water"),
-    ("go", "B5"), ("go", "A3"), ("go", "C1"), ("go", "C3"), ("go", "C4"),
-    ("talk", "balam", "dash"),
-    ("go", "C3"), ("go", "C1"), ("go", "C2"),
-    ("boss", "jaguar", "g_jaguar"),
-    ("go", "C1"), ("go", "A3"), ("go", "D1"),
-    ("touch", "feather"),
-    ("go", "D3"),
-    ("boss", "eagle", "g_sky"),
-    ("go", "D4"),
-    ("talk", "witz", "spear"),
-    ("go", "D3"), ("go", "D1"), ("go", "A3"), ("go", "C1"), ("go", "C3"),
-    ("watcher",),
-    ("go", "C1"), ("go", "A3"), ("go", "A2"), ("go", "A1"), ("go", "A0"),
-    ("go", "E1"), ("go", "E2"),
+    ("go", _room("npcs", "chaac")), ("talk", "chaac", "pearl"),
+    ("go", BOSS_HOME["xoc"]), ("boss", "xoc", "g_water"),
+    ("go", _room("npcs", "balam")), ("talk", "balam", "dash"),
+    ("go", BOSS_HOME["jaguar"]), ("boss", "jaguar", "g_jaguar"),
+    ("go", _room("items", "feather")), ("touch", "feather"),
+    ("go", BOSS_HOME["eagle"]), ("boss", "eagle", "g_sky"),
+    ("go", _room("npcs", "witz")), ("talk", "witz", "spear"),
+    ("go", WATCH_ROOMS[0]), ("watcher",),
+    ("go", "A0"), ("go", BOSS_HOME["camazotz"]),
     ("boss", "camazotz", None),
     ("ending",),
 ]
@@ -112,15 +112,219 @@ def neighbours(rid, g):
     return out
 
 
-def first_hop(src, dst, g):
+def _load_graph():
+    path = TOOLS / "out" / "room_graph.json"
+    if not path.exists():
+        print("no %s, routing on open seams; run solve_world.py first" % path, flush=True)
+        return {}
+    with open(path) as f:
+        return {s: [tuple(e) for e in v] for s, v in json.load(f).items()}
+
+
+GRAPH = _load_graph()
+
+
+def _stage(g):
+    if g.flags.get("gate_open"):
+        return "gate"
+    for s in ("spear", "feather", "dash", "pearl", "blade"):
+        if g.has(s):
+            return s
+    return "blade"
+
+
+def crack_sealed(src, dst, g):
+    """True when every open seam tile is backed by a crack the player cannot dash yet.
+
+    The Dread Halls sluice is this case: B13 and F7 line up on '.', and the crack
+    sits one tile inside F7, so walking the seam embeds the body in the wall.
+    """
+    if g.has("dash"):
+        return False
+    sx, sy = ROOMS[src]["pos"]
+    dx, dy = ROOMS[dst]["pos"]
+    step = (dx - sx, dy - sy)
+    sm, dm = ROOMS[src]["map"], ROOMS[dst]["map"]
+    if step == (1, 0):
+        pairs = [(sm[r][19], dm[r][0], sm[r][18], dm[r][1]) for r in range(14)]
+    elif step == (-1, 0):
+        pairs = [(sm[r][0], dm[r][19], sm[r][1], dm[r][18]) for r in range(14)]
+    elif step == (0, 1):
+        pairs = [(sm[13][c], dm[0][c], sm[12][c], dm[1][c]) for c in range(20)]
+    elif step == (0, -1):
+        pairs = [(sm[0][c], dm[13][c], sm[1][c], dm[12][c]) for c in range(20)]
+    else:
+        return False
+    open_seam = [p for p in pairs if p[0] != "#" and p[1] != "#"]
+    return bool(open_seam) and all(p[2] == "%" or p[3] == "%" for p in open_seam)
+
+
+def _passable(room, c, r, g):
+    if not (0 <= c < COLS and 0 <= r < ROWS):
+        return False
+    tile = room.tile(c, r)
+    # A crack stays a wall here. The bot does not dash one on the way through a pocket.
+    return not SOLID[tile]
+
+
+def _component(room, c, r, g):
+    """Open tiles reachable from this cell, stepping up off a floor landing."""
+    if not _passable(room, c, r, g):
+        r -= 1
+    seen = set()
+    stack = [(c, r)]
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in seen or not _passable(room, x, y, g):
+            continue
+        seen.add((x, y))
+        stack.extend(((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)))
+    return seen
+
+
+def _edge_cells(room, direction, g):
+    if direction == "N":
+        return [(c, 0) for c in range(COLS) if _passable(room, c, 0, g)]
+    if direction == "S":
+        return [(c, ROWS - 1) for c in range(COLS) if _passable(room, c, ROWS - 1, g)]
+    if direction == "W":
+        return [(0, r) for r in range(ROWS) if _passable(room, 0, r, g)]
+    return [(COLS - 1, r) for r in range(ROWS) if _passable(room, COLS - 1, r, g)]
+
+
+def _capped_by_crack(room, entry, g):
+    """A short ledge under the door, with a crack beside it, so the drop is shut.
+
+    Gallery of Masks is this case: the north door stands on rock three tiles down
+    and the only gap to the left is a crack the route will not dash.
+    """
+    edge = _edge_cells(room, entry, g)
+    if not edge:
+        return False
+    inward = {"N": (0, 1), "S": (0, -1), "W": (1, 0), "E": (-1, 0)}[entry]
+    ledge = []
+    for c, r in edge:
+        x, y = c, r
+        run = [(c, r)]
+        for _ in range(4):
+            x += inward[0]
+            y += inward[1]
+            if not _passable(room, x, y, g):
+                break
+            run.append((x, y))
+        if len(run) > 4:
+            return False
+        ledge.extend(run)
+    for c, r in ledge:
+        for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            cc, rr = c + dc, r + dr
+            if 0 <= cc < COLS and 0 <= rr < ROWS and room.tile(cc, rr) == T_CRACK:
+                return True
+    return False
+
+
+_DEAD = {}
+
+
+def dead_end_drop(src, dst, g):
+    """True when the doorway drops into a pocket that cannot reach any other exit.
+
+    D1's north shaft is this case: the floor under the eagle climb is solid, so
+    falling in from D2 cannot reach the Misty Ascent doors below.
+    """
+    key = (src, dst, _stage(g))
+    hit = _DEAD.get(key)
+    if hit is not None:
+        return hit
+    sx, sy = ROOMS[src]["pos"]
+    dx, dy = ROOMS[dst]["pos"]
+    entry = {(1, 0): "W", (-1, 0): "E", (0, 1): "N", (0, -1): "S"}.get((dx - sx, dy - sy))
+    if entry is None:
+        _DEAD[key] = False
+        return False
+    room = G.Room(dst)
+    if g.has("pearl"):
+        room.open_tiles(G.T_RAIN)
+    if g.flags.get("gate_open"):
+        room.open_tiles(G.T_GATE)
+    x, y = landing(dst, entry)
+    cells = _component(room, int(x) >> 4, int(y + 6) >> 4, g)
+    if not cells:
+        _DEAD[key] = False
+        return False
+    if _capped_by_crack(room, entry, g):
+        _DEAD[key] = True
+        return True
+    x0, y0 = ROOMS[dst]["pos"]
+    onward = False
+    for name, pos in (("E", (x0 + 1, y0)), ("W", (x0 - 1, y0)), ("N", (x0, y0 - 1)), ("S", (x0, y0 + 1))):
+        if name == entry or not AT.get(pos):
+            continue
+        if any(cell in cells for cell in _edge_cells(room, name, g)):
+            onward = True
+            break
+    _DEAD[key] = not onward
+    return _DEAD[key]
+
+
+_SKIPPED = set()
+
+
+def solved_neighbours(rid, g):
+    """Directed hops the physics solver proved for the current ability stage."""
+    links = GRAPH.get(_stage(g))
+    if not links:
+        return neighbours(rid, g)
+    x, y = ROOMS[rid]["pos"]
+    out = {}
+    for a, b in links:
+        if a != rid:
+            continue
+        bx, by = ROOMS[b]["pos"]
+        d = {(1, 0): "E", (-1, 0): "W", (0, -1): "N", (0, 1): "S"}.get((bx - x, by - y))
+        if not d:
+            continue
+        if crack_sealed(rid, b, g):
+            if (rid, b) not in _SKIPPED:
+                _SKIPPED.add((rid, b))
+                print("terrain skip %s -> %s" % (rid, b), flush=True)
+            continue
+        out[d] = b
+    return out
+
+
+def exit_reachable(room, p, direction, g):
+    """The doorway shares open air with the player. A capped shaft does not."""
+    cells = _component(room, int(p.x + 4) >> 4, int(p.y + 6) >> 4, g)
+    if not cells:
+        return True
+    return any(cell in cells for cell in _edge_cells(room, direction, g))
+
+
+def _skip(rid, nxt):
+    if (rid, nxt) not in _SKIPPED:
+        _SKIPPED.add((rid, nxt))
+        print("terrain skip %s -> %s" % (rid, nxt), flush=True)
+
+
+def first_hop(src, dst, g, blocked=()):
     if src == dst:
         return None
+    player = getattr(g, "player", None)
+    here = getattr(g, "room", None)
     prev = {src: None}
     q = deque([src])
     while q:
         rid = q.popleft()
-        for direction, nxt in neighbours(rid, g).items():
-            if nxt in prev:
+        for direction, nxt in solved_neighbours(rid, g).items():
+            if (rid, nxt) in blocked or nxt in prev:
+                continue
+            if nxt != dst and dead_end_drop(rid, nxt, g):
+                _skip(rid, nxt)
+                continue
+            if (rid == src and player is not None and here is not None and here.id == rid
+                    and not exit_reachable(here, player, direction, g)):
+                _skip(rid, nxt)
                 continue
             prev[nxt] = (rid, direction)
             if nxt == dst:
@@ -130,6 +334,17 @@ def first_hop(src, dst, g):
                 return prev[node][1], node
             q.append(nxt)
     return None
+
+
+def embedded(room, p):
+    """True when the body sits inside solid ground rather than on it."""
+    y = int(p.y) + 4
+    last = int(p.y) + 10
+    while y <= last:
+        if room.solid(p.x + 2, y) and room.solid(p.x + 7, y):
+            return True
+        y += 4
+    return False
 
 
 def standable(tile):
@@ -247,6 +462,8 @@ class Bot:
         self.last_keys = set()
         self.last_t = -1
         self.done = False
+        self.blocked = set()
+        self.block_stage = None
 
     def goal(self):
         if self.i >= len(GOALS):
@@ -339,6 +556,10 @@ class Bot:
         return None
 
     def play(self, g):
+        stage = _stage(g)
+        if stage != self.block_stage:
+            self.blocked.clear()
+            self.block_stage = stage
         if self.finished_goal(g):
             self.advance("ok")
         goal = self.goal()
@@ -373,13 +594,13 @@ class Bot:
         if kind == "go" and room.id != goal[1]:
             dest = goal[1]
         elif kind == "boss":
-            home = {"xoc": "B4", "jaguar": "C2", "eagle": "D3", "camazotz": "E2"}[goal[1]]
+            home = BOSS_HOME[goal[1]]
             if room.id != home and not (goal[2] and g.has(goal[2])):
                 dest = home
         elif kind == "watcher" and not isinstance(g.boss, Watcher) and not g.items_here:
-            dest = "C4" if room.id == "C3" else "C3"
+            dest = WATCH_ROOMS[1] if room.id == WATCH_ROOMS[0] else WATCH_ROOMS[0]
         if dest:
-            hop = first_hop(room.id, dest, g)
+            hop = first_hop(room.id, dest, g, self.blocked)
             if not hop:
                 return None
             direction, nxt = hop
@@ -538,7 +759,7 @@ class Bot:
             keys |= self.beam(g, dx, dy)
         elif mode == "talk" and abs(dx) < 18 and abs(dy) < 24 and g.t % 20 == 0:
             keys.add("U")
-        elif mode == "go":
+        if mode not in ("talk", "beam", "fight"):
             self.slash_near(g, keys)
         if self.stuck == 90:
             keys.add("B")
@@ -560,7 +781,7 @@ class Bot:
 
     def shove(self, g, dest):
         """Step through the real doorway when a transition has stalled."""
-        hop = first_hop(g.room.id, dest, g)
+        hop = first_hop(g.room.id, dest, g, self.blocked)
         if not hop:
             return
         direction, nxt = hop
@@ -569,15 +790,45 @@ class Bot:
         print("shove", g.room.id, direction, "->", nxt, flush=True)
 
     def slash_near(self, g, keys):
+        """Face the nearest enemy inside the blade and swing. Travel keeps going otherwise."""
         p = g.player
-        if not g.has("blade") or g.t % 8:
+        if not g.has("blade") or p.atk_cd > 1:
             return
+        target = None
+        best = 42 * 42
         for e in g.enemies:
-            if e.kind == "lurker":
+            if not e.alive or e.kind == "lurker":
                 continue
-            if abs((e.x + e.w / 2) - p.cx) < 28 and abs((e.y + e.h / 2) - p.cy) < 22:
-                keys.add("Y")
-                return
+            dx = (e.x + e.w / 2) - p.cx
+            dy = (e.y + e.h / 2) - p.cy
+            d2 = dx * dx + dy * dy
+            if d2 < best:
+                best = d2
+                target = (dx, dy, e)
+        if target is None:
+            return
+        dx, dy, e = target
+        up = dy < -10 and abs(dx) < 22
+        face = 1 if dx >= 0 else -1
+        # Padded past the real slash box so the swing starts as the body arrives.
+        # The hit is tested after this frame's movement.
+        if up:
+            box = (p.x - 10, p.y - 28, 30, 30)
+        elif face > 0:
+            box = (p.x + 2, p.y - 10, 36, 30)
+        else:
+            box = (p.x - 30, p.y - 10, 36, 30)
+        er = (e.x, e.y, e.w, e.h)
+        if not (box[0] < er[0] + er[2] and box[0] + box[2] > er[0]
+                and box[1] < er[1] + er[3] and box[1] + box[3] > er[1]):
+            return
+        keys.discard("L")
+        keys.discard("R")
+        if up:
+            keys.add("U")
+        else:
+            keys.add("R" if face > 0 else "L")
+        keys.add("Y")
 
     def fight(self, g, dx):
         keys = set()
@@ -638,7 +889,7 @@ class Bot:
                     return self.raise_path(g, x, y, "go")
             return p.cx, p.cy, "go"
         if kind == "boss":
-            home = {"xoc": "B4", "jaguar": "C2", "eagle": "D3", "camazotz": "E2"}[goal[1]]
+            home = BOSS_HOME[goal[1]]
             need = goal[2]
             if need and g.flags.get("boss_" + goal[1]) and not g.has(need) and not g.items_here:
                 g.grant(need)
@@ -657,7 +908,7 @@ class Bot:
                 return x, y, "go"
             if isinstance(g.boss, Watcher):
                 return g.boss.x + 11, g.boss.y + 8, "beam"
-            other = "C4" if room.id == "C3" else "C3"
+            other = WATCH_ROOMS[1] if room.id == WATCH_ROOMS[0] else WATCH_ROOMS[0]
             return self.toward(g, other)
         if kind == "go":
             if room.id == goal[1]:
@@ -684,7 +935,7 @@ class Bot:
     def toward(self, g, dest):
         room = g.room
         p = g.player
-        hop = first_hop(room.id, dest, g)
+        hop = first_hop(room.id, dest, g, self.blocked)
         if not hop:
             return p.cx, p.cy, "go"
         direction, _ = hop
@@ -762,6 +1013,11 @@ def main():
             if keys:
                 emu_state.buttons.update(keys)
             g.frame()
+            if g.state == G.PLAY and g.player and g.room and embedded(g.room, g.player):
+                spot = (g.room.id, int(g.player.x) // 16, int(g.player.y) // 16)
+                if spot != getattr(bot, "embed_spot", None):
+                    bot.embed_spot = spot
+                    print("terrain skip inside %s (%d,%d)" % spot, flush=True)
             if trace is not None and g.state == G.PLAY and g.player:
                 p = g.player
                 trace.write("%d %s %.0f %.0f %d %d %s %s\n" % (

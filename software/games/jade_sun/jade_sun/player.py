@@ -1,6 +1,6 @@
 """Player physics and actions. Pure logic: emits events for the game to react to."""
 from micropython import const
-from .world import T_PLANK, T_GRATE, T_SPIKE, T_CRACK, T_WATER, SOLID
+from .world import T_PLANK, T_GRATE, T_SPIKE, T_CRACK, SOLID
 
 U = const(1)
 D = const(2)

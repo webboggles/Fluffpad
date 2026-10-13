@@ -1,8 +1,8 @@
 """Emulator module: scripted end-to-end exercise of every system with a simple combat bot.
 Run: run_emu.py --module tools.scenario --frames 40000 --shots ..."""
-import math
 from jade_sun import game as G, hw, save
 from jade_sun.bosses import Watcher
+from jade_sun.world_data import ROOMS, AT
 
 LOG = []
 
@@ -31,6 +31,54 @@ class Bot:
         inp.released = self.prev & ~held
         inp.held = held
         self.prev = held
+
+
+def spot(rid, ch):
+    """Standing position on the first marker ch in room rid."""
+    for r, line in enumerate(ROOMS[rid]["map"]):
+        c = line.find(ch)
+        if c >= 0:
+            return c * 16 + 3, (r + 1) * 16 - 14
+    raise AssertionError("no %s in %s" % (ch, rid))
+
+
+def spawn_floor(rid):
+    from tools.fuzz import spawn_for
+    return spawn_for(ROOMS[rid]["map"])
+
+
+def arena_spot(rid):
+    """Floor spot inside the boss trigger band (56 < cx < 264), water counts as open."""
+    rows = ROOMS[rid]["map"]
+    for c in (6, 5, 7, 4, 8, 13, 14, 12, 15):
+        for r in range(12, 0, -1):
+            if rows[r][c] in ".~" and rows[r + 1][c] in "#=%":
+                return c * 16 + 3, (r + 1) * 16 - 14
+    raise AssertionError("no arena floor in " + rid)
+
+
+def room_with(key, val):
+    for rid, m in ROOMS.items():
+        if val in m.get(key, ()):
+            return rid
+    raise AssertionError("no room with %s %s" % (key, val))
+
+
+def watcher_exit():
+    """A Z room, a dread neighbour beside it, and a walkable spot on the shared edge."""
+    for rid, m in sorted(ROOMS.items()):
+        rows = m["map"]
+        if "Z" not in "".join(rows):
+            continue
+        cx, cy = m["pos"]
+        for dx, col, x0, x1 in ((-1, 0, 20, -6), (1, 19, 290, 316)):
+            nb = AT.get((cx + dx, cy))
+            if not nb or not ROOMS[nb].get("watcher"):
+                continue
+            for r in range(1, 13):
+                if rows[r][col] != "#" and rows[r - 1][col] != "#" and rows[r + 1][col] in "#=%g":
+                    return rid, nb, x0, x1, (r + 1) * 16 - 14
+    raise AssertionError("no watcher room with a walkable side exit")
 
 
 def run(g, n):
@@ -93,7 +141,9 @@ def main():
     bot = Bot(g)
     g.inp.poll = bot.poll
 
-    # title -> new quest -> prologue skip -> form
+    # intro skip -> title -> new quest -> prologue skip -> form
+    mash_until(bot, g, lambda: g.state == G.TITLE, 2000, "intro skip")
+    run(g, 10)
     press(bot, g, hw.BB)
     assert g.state == G.PROLOGUE
     press(bot, g, hw.PLUS)
@@ -115,7 +165,10 @@ def main():
 
     # shop: buy refill with cacao
     g.cacao = 200
-    g.player.x, g.player.y = 16 * 16, 178
+    shop = next(r for r in sorted(ROOMS) if "D" in "".join(ROOMS[r]["map"]))
+    if shop != g.room.id:
+        g.enter_room(shop, *spot(shop, "D"))
+    g.player.x, g.player.y = spot(shop, "D")
     run(g, 3)
     press(bot, g, hw.U)
     mash_until(bot, g, lambda: g.state == G.SHOP, 300, "shop open")
@@ -129,12 +182,13 @@ def main():
     log("shop ok, max_hp", g.max_hp, "atk", g.attack())
 
     # lore and shrine save
-    g.player.x, g.player.y = 8 * 16 + 3, 5 * 16 + 1
+    g.enter_room("A1", *spot("A1", "L"))
     run(g, 4)
     press(bot, g, hw.U)
     assert g.state == G.DIALOG and g.has("l1")
     mash_until(bot, g, lambda: g.state == G.PLAY, 300, "lore done")
-    g.player.x, g.player.y = 10 * 16 + 3, 11 * 16 + 1
+    shrine = next(r for r in sorted(ROOMS) if r.startswith("A") and "P" in "".join(ROOMS[r]["map"]))
+    g.enter_room(shrine, *spot(shrine, "P"))
     run(g, 4)
     press(bot, g, hw.U)
     assert save.exists(), "saved"
@@ -150,10 +204,9 @@ def main():
     log("map ok")
 
     # Chaac pearl
-    g.enter_room("B2", 40, 60)
-    run(g, 5)
-    g.player.x, g.player.y = 2 * 16 + 3, 5 * 16 + 1
-    run(g, 3)
+    chaac = room_with("npcs", "chaac")
+    g.enter_room(chaac, *spot(chaac, "N"))
+    run(g, 8)
     press(bot, g, hw.U)
     mash_until(bot, g, lambda: g.state == G.ITEM, 500, "pearl item")
     run(g, 32)
@@ -162,16 +215,18 @@ def main():
     log("pearl ok")
 
     # lurker bite in the trench
+    lurk = next(r for r in sorted(ROOMS) if ROOMS[r].get("lurker"))
+    g.enter_room(lurk, 112, 120)
     hp = g.hp
-    g.player.x, g.player.y = 160, 150
+    g.player.x, g.player.y = 112, 140
     run(g, 120)
     log("lurker trench hp", hp, "->", g.hp)
 
     # bosses
-    for rid, pos, ranged in (("B4", (60, 150), False), ("C2", (60, 178), False),
-                             ("D3", (60, 178), False), ("E2", (150, 130), True)):
+    for boss, ranged in (("xoc", False), ("jaguar", False), ("eagle", False), ("camazotz", True)):
+        rid = next(r for r in sorted(ROOMS) if ROOMS[r].get("boss") == boss)
         g.items |= {"dash", "feather", "spear"}
-        g.enter_room(rid, *pos)
+        g.enter_room(rid, *arena_spot(rid))
         bot.auto = fighter(g, ranged)
         g.hp = 99
         until(g, lambda: g.boss is not None, 200, rid + " boss spawn")
@@ -185,10 +240,13 @@ def main():
                 break
             g.frame()
         bot.auto = None
-        log(rid, name, "states", sorted(states), "state", g.state, "frames", i)
+        log(rid, name, "states", sorted(states), "state", g.state, "frames", i, "room", g.room.id)
         if rid == "E2":
             assert g.state == G.ENDING, "ending reached"
             break
+        if g.state == G.PLAY and g.items_here:
+            it = g.items_here[-1]
+            g.player.x, g.player.y = it[1] - 5, it[2] - 7
         mash_until(bot, g, lambda: g.state == G.ITEM, 600, rid + " reward", 0)
         run(g, 32)
         press(bot, g, hw.BB)
@@ -204,22 +262,24 @@ def main():
     log("continue ok room", g.room.id, "items", len(g.items))
     g.flags.pop("watcher_dead", None)
     g.items.discard("g_stone")
-    g.enter_room("C4", 30, 178)
+    zr, nb, x0, x1, wy = watcher_exit()
+    g.enter_room(zr, x0, wy)
     run(g, 3)
     assert isinstance(g.boss, Watcher)
     g.boss.go("alert")
     g.watcher_alert()
     g.hp = 99
-    g.player.x = 20
+    g.player.x, g.player.y = x0, wy
     run(g, 40)
-    g.player.x, g.player.vx = -6, -3
+    g.player.x, g.player.y, g.player.vx = x1, wy, (-3 if x1 < 0 else 3)
     run(g, 2)
-    assert g.room.id == "C3", g.room.id
+    assert g.room.id == nb, (g.room.id, nb)
     assert isinstance(g.boss, Watcher) and g.boss.state == "chase", "watcher followed"
     log("watcher followed into", g.room.id)
-    g.player.x, g.player.y = 40, 178
+    g.player.x, g.player.y = spawn_floor(g.room.id)
     w = g.boss
-    w.x, w.y, w.emerge = 200, 192 - w.h, 0
+    w.x = g.player.x + (120 if g.player.x < 160 else -120)
+    w.y, w.emerge = g.player.y + 14 - w.h, 0
 
     def charger():
         p = g.player
@@ -239,7 +299,7 @@ def main():
 
     # gate
     g.flags.pop("gate_open", None)
-    g.enter_room("A0", 250, 178)
+    g.enter_room("A0", *spawn_floor("A0"))
     mash_until(bot, g, lambda: g.flags.get("gate_open") and g.state == G.PLAY, 600, "gate opens")
     log("gate ok")
 

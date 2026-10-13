@@ -1,5 +1,16 @@
-"""Physics reachability solver: drives the real Player class with input macros across all rooms,
-per ability stage, to prove gating, item reachability and absence of soft-locks."""
+"""Physics reachability solver: drives the real Player class with input macros across the rooms,
+per ability stage, to prove gating, find reachability and absence of soft-locks.
+
+Expectations come from the data: a room's "stage" and world_data.FINDS say the first stage at
+which it must be reachable, and it must not be reachable at any earlier stage.
+
+  .venv/bin/python games/jade_sun/tools/solve_world.py                 whole world from the start,
+                                       also writes out/room_graph.json for the playthrough bot
+  .venv/bin/python games/jade_sun/tools/solve_world.py --zone cenote   one zone from its ENTRY list;
+                                       stepping into another zone counts as a safe exit
+"""
+import argparse
+import json
 import os
 import sys
 import types
@@ -14,19 +25,23 @@ sys.modules["micropython"] = mp
 
 from jade_sun import world_data as wd  # noqa: E402
 from jade_sun.world import Room, T_RAIN, T_GATE, T_SEAL, T_CRACK, COLS, ROWS  # noqa: E402
-from jade_sun.player import Player, PW, PH  # noqa: E402
+from jade_sun.player import Player, PW  # noqa: E402
 
 U, D, L, R, DASH, JUMP = 1, 2, 4, 8, 16, 32
-ONE_WAY = {"E2"}  # final arena: the fight ends the game, death respawns at a shrine
+ONE_WAY = {rid for rid, r in wd.ROOMS.items() if r.get("boss") == "camazotz"}  # the fight ends the game
+ABIL = {"blade": {"blade"}, "pearl": {"pearl"}, "dash": {"dash"}, "feather": {"feather"},
+        "spear": {"spear"}, "gate": {"gate"}}
+MAX_STATES = 150000
+GRAPH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out", "room_graph.json")
 
-STAGES = [
-    ("blade", {"blade"}),
-    ("pearl", {"blade", "pearl"}),
-    ("dash", {"blade", "pearl", "dash"}),
-    ("feather", {"blade", "pearl", "dash", "feather"}),
-    ("spear", {"blade", "pearl", "dash", "feather", "spear"}),
-    ("gate", {"blade", "pearl", "dash", "feather", "spear", "gate"}),
-]
+
+def stage_abil(name):
+    out = set()
+    for s in wd.STAGES:
+        out |= ABIL[s]
+        if s == name:
+            return out
+    raise KeyError(name)
 
 
 def macros(abil):
@@ -82,8 +97,11 @@ class World:
                 st += [(cc + 1, rr), (cc - 1, rr), (cc, rr + 1), (cc, rr - 1)]
 
 
-def simulate(world, rid, x, y, inputs, touched):
+def simulate(world, rid, x, y, inputs, touched, scope=None, links=None):
+    """Play inputs then settle. Returns a resting state, ("exit", rid) on leaving scope, or None.
+    Room crossings of a run that ends safely are added to links."""
     has = world.abil.__contains__
+    crossed = []
     room = world.room(rid)
     p = Player(x, y)
     p.update(0, 0, 0, room, has)
@@ -105,6 +123,7 @@ def simulate(world, rid, x, y, inputs, touched):
                 world.break_at(room, ev[1], ev[2])
         p.events = []
         cx, cy = p.cx, p.cy
+        was = rid
         if cx < 0 and room.nb_w:
             rid = room.nb_w
             p.x += 320
@@ -120,45 +139,63 @@ def simulate(world, rid, x, y, inputs, touched):
             p.y -= 224
         else:
             p.x = max(-PW / 2 + 1 if room.nb_w else 0, min(p.x, 320 - (PW / 2 + 1 if room.nb_e else PW)))
+        if rid != was:
+            crossed.append((was, rid))
+        if scope is not None and rid not in scope:
+            return ("exit", rid)
         room = world.room(rid)
         touched.add((rid, int(p.cx) >> 3, int(p.cy) >> 3))
         if f >= len(inputs) and p.ground:
             rest += 1
             if rest > 1:
+                if links is not None:
+                    links.update(crossed)
                 return (rid, round(p.x / 3) * 3, round(p.y))
         else:
             rest = 0
     return None
 
 
-def bfs(stage):
-    name, abil = stage
+def bfs(job):
+    name, entries, scope = job
+    abil = stage_abil(name)
     world = World(abil)
     ms = macros(abil)
-    sx, sy = wd.START_POS
-    start = simulate(world, wd.START_ROOM, sx, sy, [], set())
-    seen = {start: 0}
-    edges = {}
-    q = deque([start])
     touched = set()
-    while q and len(seen) < 20000:
+    starts = []
+    for rid, x, y in entries:
+        s = simulate(world, rid, x, y, [], touched, scope)
+        if s and s[0] != "exit":
+            starts.append(s)
+    seen = set(starts)
+    edges = {}
+    links = set()
+    exits = set()
+    safe = set()
+    q = deque(starts)
+    while q and len(seen) < MAX_STATES:
         s = q.popleft()
         rid, x, y = s
         out = set()
         for m in ms:
-            r = simulate(world, rid, x, y, m, touched)
-            if r and r != s:
-                out.add(r)
-                if r not in seen:
-                    seen[r] = 1
-                    q.append(r)
+            r = simulate(world, rid, x, y, m, touched, scope, links)
+            if not r or r == s:
+                continue
+            if r[0] == "exit":
+                exits.add(r[1])
+                safe.add(s)
+                continue
+            out.add(r)
+            if r not in seen:
+                seen.add(r)
+                q.append(r)
         edges[s] = out
     rev = {}
     for a, outs in edges.items():
         for b in outs:
             rev.setdefault(b, set()).add(a)
-    back = {start}
-    q = deque([start])
+    back = set(starts) | safe
+    q = deque(back)
     while q:
         s = q.popleft()
         for a in rev.get(s, ()):
@@ -166,11 +203,12 @@ def bfs(stage):
                 back.add(a)
                 q.append(a)
     traps = [s for s in seen if s not in back and s[0] not in ONE_WAY]
-    rooms = sorted({s[0] for s in seen})
-    return name, rooms, touched, traps, len(seen)
+    rooms = sorted({s[0] for s in seen} | {t[0] for t in touched})
+    capped = len(seen) >= MAX_STATES
+    return name, rooms, touched, traps, len(seen), sorted(exits), capped, sorted(links)
 
 
-def item_spots():
+def find_spots():
     spots = {}
     for rid, r in wd.ROOMS.items():
         ids = {"i": list(r.get("items", ())), "N": list(r.get("npcs", ())), "L": list(r.get("lore", ()))}
@@ -189,45 +227,62 @@ def near(touched, rid, x, y, rad=14):
     return False
 
 
-EXPECT = {
-    "blade": ({"A0", "A1", "A2", "A3", "B1", "B2"}, ["ceiba", "chaac", "l1", "l2", "l3"]),
-    "pearl": ({"B3", "B4", "B5", "C1", "C3", "C4"}, ["balam", "heart2", "l4"]),
-    "dash": ({"C2", "D1", "D2"}, ["feather", "heart1", "l5"]),
-    "feather": ({"D3", "D4"}, ["witz", "heart4"]),
-    "spear": (set(), ["heart3"]),
-    "gate": ({"E1", "E2"}, ["l6"]),
-}
-FORBID = {
-    "blade": {"B3", "B4", "B5", "C1", "C2", "C3", "C4", "D1", "D2", "D3", "D4", "E1", "E2"},
-    "pearl": {"C2", "D1", "D2", "D3", "D4", "E1", "E2"},
-    "dash": {"D3", "D4", "E1", "E2"},
-    "feather": {"E1", "E2"},
-    "spear": {"E1", "E2"},
-    "gate": set(),
-}
-FORBID_ITEMS = {"blade": ["heart1", "heart2", "heart3", "heart4", "feather"],
-                "pearl": ["heart1", "heart3", "heart4", "feather"],
-                "dash": ["heart3", "heart4"], "feather": ["heart3"]}
-
-if __name__ == "__main__":
-    spots = item_spots()
-    with Pool(min(len(STAGES), cpu_count())) as pool:
-        results = pool.map(bfs, STAGES)
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--zone", default="", help="solve one zone from its ENTRY list")
+    ap.add_argument("--stages", default="", help="comma list of stages to run")
+    a = ap.parse_args()
+    idx = {s: i for i, s in enumerate(wd.STAGES)}
+    if a.zone:
+        mod = wd.ZONE_FILES[a.zone]
+        scope = set(mod.ROOMS)
+        entries = mod.ENTRY
+        first = min(idx[e[3]] for e in entries)
+        stages = wd.STAGES[first:]
+        jobs = [(s, [(e[0], e[1], e[2]) for e in entries if idx[e[3]] <= idx[s]], scope) for s in stages]
+    else:
+        scope = None
+        stages = wd.STAGES
+        jobs = [(s, [(wd.START_ROOM,) + tuple(wd.START_POS)], None) for s in stages]
+    if a.stages:
+        keep = set(a.stages.split(","))
+        jobs = [j for j in jobs if j[0] in keep]
+    rooms_in = set(scope) if scope else set(wd.ROOMS)
+    finds_in = {f: s for f, s in wd.FINDS.items()}
+    spots = find_spots()
+    finds_in = {f: s for f, s in finds_in.items() if f in spots and spots[f][0] in rooms_in}
+    with Pool(min(len(jobs), cpu_count())) as pool:
+        results = pool.map(bfs, jobs)
     ok = True
-    for name, rooms, touched, traps, n in results:
-        need_rooms, need_items = EXPECT[name]
-        missing = need_rooms - set(rooms)
-        bad = FORBID[name] & set(rooms)
-        miss_items = [i for i in need_items if not near(touched, *spots[i])]
-        leak_items = [i for i in FORBID_ITEMS.get(name, []) if near(touched, *spots[i])]
+    if not a.zone and not a.stages:
+        os.makedirs(os.path.dirname(GRAPH), exist_ok=True)
+        with open(GRAPH, "w") as f:
+            json.dump({r[0]: r[7] for r in results}, f, indent=0)
+    for name, rooms, touched, traps, n, exits, capped, _links in results:
+        si = idx[name]
+        reached = set(rooms) & rooms_in
+        need = {r for r in rooms_in if idx[wd.ROOMS[r]["stage"]] <= si}
+        missing = need - reached
+        early = reached - need
+        miss_f = sorted(f for f, s in finds_in.items() if idx[s] <= si and not near(touched, *spots[f]))
+        leak_f = sorted(f for f, s in finds_in.items() if idx[s] > si and near(touched, *spots[f]))
         trap_rooms = sorted({t[0] for t in traps})
-        print(f"[{name}] states={n} rooms={','.join(rooms)}")
-        for label, val in (("missing rooms", missing), ("forbidden rooms", bad), ("unreached", miss_items),
-                           ("leaked items", leak_items), ("soft-lock rooms", trap_rooms)):
+        early_exits = sorted(x for x in exits if idx[wd.ROOMS[x]["stage"]] > si)
+        print("[%s] states=%d rooms=%s%s" % (name, n, ",".join(sorted(reached)), "  (STATE CAP HIT)" if capped else ""))
+        if exits:
+            print("      exits to: %s" % ",".join(exits))
+        for label, val in (("missing rooms", missing), ("rooms reachable too early", early),
+                           ("exits into rooms of a later stage", early_exits),
+                           ("unreached finds", miss_f), ("finds reachable too early", leak_f),
+                           ("soft-lock rooms", trap_rooms)):
             if val:
                 ok = False
-                print(f"   !! {label}: {sorted(val) if isinstance(val, set) else val}")
+                print("   !! %s: %s" % (label, sorted(val)))
         if traps:
-            print("      trap samples:", traps[:6])
+            print("      trap samples (room, x, y):", traps[:6])
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

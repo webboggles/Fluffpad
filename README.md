@@ -4,13 +4,13 @@ A pocket games console built from a Raspberry Pi RP2350 and Pimoroni parts, with
 
 ![Fluffpad running La-Fluff-Puff and the Jade Sun](hardware/photos/fluffpad_jade_sun.jpg)
 
-[![Fluffpad video](https://img.youtube.com/vi/6VVI-QsO-Uw/hqdefault.jpg)](https://youtu.be/6VVI-QsO-Uw)
+[![Fluffpad video](https://img.youtube.com/vi/FbvHK67HQnU/hqdefault.jpg)](https://youtu.be/FbvHK67HQnU)
 
 ## Games
 
 | Game | Version | Genre | Folder |
 | --- | --- | --- | --- |
-| La-Fluff-Puff and the Jade Sun | 1.0.0 | Flip-screen metroidvania RPG | [`software/games/jade_sun`](software/games/jade_sun) |
+| La-Fluff-Puff and the Jade Sun | 1.0.1 | Flip-screen metroidvania RPG | [`software/games/jade_sun`](software/games/jade_sun) |
 | La-Fluff-Puff Skedaddle | 1.0.0 | Endless runner | [`software/games/skedaddle`](software/games/skedaddle) |
 | Fluffbert's Frozen Dream | 0.5.0 | Isometric adventure (work in progress) | [`software/games/frozen_dream`](software/games/frozen_dream) |
 | Platformer Bootstrap | 0.1.0 | One-room platformer starter | [`software/games/platformer_bootstrap`](software/games/platformer_bootstrap) |
@@ -21,7 +21,7 @@ Each game's version is `__version__` in its package `__init__.py` (Jade Sun, Pla
 
 ![Jade Sun rainforest](documentation/screenshots/jade_sun_rainforest.png) ![Jade Sun boss](documentation/screenshots/jade_sun_storm_peak.png)
 
-Restore the Jade Sun across 19 rooms, five zones and five bosses inspired by Maya myth. Design notes and world map: [documentation/jade_sun_design.md](documentation/jade_sun_design.md).
+Restore the Jade Sun across 54 rooms, six zones and five bosses inspired by Maya myth. Design notes and world map: [documentation/jade_sun_design.md](documentation/jade_sun_design.md).
 
 | Input | Action |
 | --- | --- |

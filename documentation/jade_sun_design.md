@@ -23,34 +23,59 @@ Flip-screen metroidvania RPG for Pico Plus 2 W + Pico Display Pack 2.8" + Qw/ST 
 
 ## World
 
+54 rooms in six zones, one file each (`jade_sun/world_<zone>.py`), composed by `world_data.py`. Room counts: Rainforest 11, Sacred Cenote 13, Temple of the Jaguar 7, Dread Halls 7, Mountain of Witz 9, Xibalba 7. Zone links below are taken from the solver's room graph (`tools/out/room_graph.json`); labels give the first ability stage at which the crossing works.
+
 ```mermaid
 flowchart LR
-  subgraph Mountain
-    D3[Storm Peak - Ikal boss] --- D4[Summit of Witz - Sun Spear]
-    D1[Misty Ascent - Quetzal Feather] --- D2[Eagle Cliffs - heart]
-    D1 -->|double jump| D3
+  subgraph Rainforest
+    A1[A1 Ceiba Village - start, Ceiba] --- A0[A0 Great Pyramid - Sun Gate]
+    A3[A3 Temple Approach]
+    A7[A7 Strangler Fig]
+    A8[A8 Root Hollow]
+    A9[A9 Fern Gully]
+    A10[A10 Waterfall Pool]
   end
-  subgraph Surface
-    A0[Great Pyramid - Sun Gate] --- A1[Ceiba Village - start]
-    A1 --- A2[Canopy] --- A3[Temple Approach]
+  subgraph Cenote[Sacred Cenote]
+    B1[B1 Cenote Mouth]
+    B2[B2 Drowned Gallery - Chaac, Rain Pearl]
+    B4[B4 Lair of Xoc]
+    B6[B6 Dripstone Hall]
+    B11[B11 Upper Falls]
+    B13[B13 Sluice Tunnel]
   end
-  subgraph Cenote
-    B2[Drowned Gallery - Rain Pearl] --- B1[Cenote Mouth]
-    B1 -->|Pearl| B3[Abyss] --- B4[Xoc boss]
-    B4 --> B5[Waterfall Shaft]
+  subgraph Temple[Temple of the Jaguar]
+    C1[C1 Hall of Jaguars]
+    C2[C2 Jaguar Throne - Balam's Shadow]
+    C7[C7 Sunken Stair]
+    C8[C8 Upper Colonnade]
   end
-  subgraph Temple
-    C1[Temple Hall] -->|Dash wall| C2[Jaguar Throne - Shadow boss]
-    C1 --- C3[Dread Halls I] --- C4[Dread Halls II - Jaguar Dash]
+  subgraph Dread[Dread Halls]
+    F1[F1 Dread Halls]
+    F4[F4 Watcher's Deep - Balam, Jaguar Dash]
+    F7[F7 Collapsed Sluice]
+  end
+  subgraph Mountain[Mountain of Witz]
+    D1[D1 Misty Ascent]
+    D3[D3 Storm Peak - Ikal]
+    D4[D4 Summit of Witz - Witz, Sun Spear]
+    D5[D5 Hanging Monastery]
+    D6[D6 Wind Caves - Quetzal Feather]
+    D8[D8 Sky Bridge]
   end
   subgraph Xibalba
-    E1[Road of Xibalba] --> E2[Camazotz]
+    E1[E1 Road of Xibalba]
+    E2[E2 Roost of Camazotz]
   end
-  A2 --> B1
-  B5 -->|grate, one way| A3
-  A3 -->|Rain door, Pearl| C1
-  A3 -->|Dash chasm| D1
-  A0 -->|4 glyphs| E1
+  A9 <-->|blade| B1
+  A8 <-->|blade| B6
+  A3 <-->|pearl| C1
+  B13 <-->|pearl| F7
+  C7 <-->|pearl| F1
+  A10 <-->|dash| B11
+  A3 <-->|dash| D1
+  D5 -->|one way| A7
+  D8 -->|one way| C8
+  A0 <-->|4 glyphs| E1
 ```
 
 ## Progression
@@ -75,6 +100,7 @@ flowchart TD
 All paths are under `software/games/jade_sun/`.
 
 - `jade_sun/` game package, `main.py` entry point.
-- `tools/check_world.py` map validator, `tools/solve_world.py` physics reachability solver.
+- `tools/check_world.py` map validator (sizes, seams, markers, stages, corner pinches), `tools/solve_world.py` physics reachability solver; a whole-world run also writes `tools/out/room_graph.json`, which `tools/playthrough.py` routes over.
+- `tools/zone_map.py` renders a zone sheet, `tools/art_budget.py` counts draw calls per sprite and room bake against the device caps.
 - `tools/fuzz.py`, `tools/boss_test.py`, `tools/scenario.py`, `tools/room_tour.py` emulator soak and story tests; `tools/playthrough.py` bot playthrough to MP4.
 - `tools/device_perf.py`, `tools/device_profile.py` on-device timing.

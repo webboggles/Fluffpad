@@ -571,11 +571,13 @@ def _run_probe(emu_state, game, names, job):
         if fail and fail["kind"] == "exception":
             return frames, failures
     job["probe"] = "seal"
-    job["room"] = "C1"
+    from jade_sun.world_data import ROOMS
+    seal = next(r for r in sorted(ROOMS) if "S" in "".join(ROOMS[r]["map"]))
+    job["room"] = seal
     try:
         game.new_game()
         game.items = {"spear", "blade"}
-        game._start_play("C1", 48, 48)
+        game._start_play(seal, *spawn_for(ROOMS[seal]["map"]))
         game.player.face = 1
         n, fail = burst({"X"}, 25)
         note(n, fail)

@@ -2,6 +2,7 @@
 import math
 import random
 from machine import Pin, PWM
+import time
 
 _NAMES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
@@ -133,14 +134,14 @@ SFX["levelup"] = tune("G5.1 A5.1 B5.1 D6.1 G6.4", 2, 1500)
 SFX["death"] = tune("E5.2 D#5.2 D5.2 C#5.6 r.2 A3.8", 3, 1300)
 SFX["shop"] = tune("E6.1 G6.1 C7.3", 2, 1100)
 
-VOLUMES = (0.0, 0.5, 1.0, 1.6)
+VOLUMES = (0.0, 0.15, 1.0, 1.6)
 
 
 class Audio:
     def __init__(self):
         self.pwm = PWM(Pin(6))
         self.pwm.duty_u16(0)
-        self.vol_index = 2
+        self.vol_index = 1
         self.song_name = None
         self.song = None
         self.sfx = None
@@ -159,6 +160,23 @@ class Audio:
         self.chime_i = 0
         self.chime_t = 0
         self.music_on = True
+        self.last_ms = time.ticks_ms()
+
+    def pump(self):
+        """Run the 25 fps sequencer for the wall time that passed, so music keeps time
+        through slow frames and room bakes (the bake calls this between draw stages)."""
+        now = time.ticks_ms()
+        n = time.ticks_diff(now, self.last_ms) // 40
+        if n <= 0:
+            return
+        if n > 6:
+            n = 6
+            self.last_ms = now
+        else:
+            self.last_ms += n * 40
+        while n:
+            self.tick()
+            n -= 1
 
     @property
     def vol(self):
@@ -171,12 +189,12 @@ class Audio:
     def play_song(self, name, restart=False):
         if name == self.song_name and not restart:
             return
+        song = None
+        if name is not None:
+            unit, mel, drums, vol, vib = SONGS[name]
+            song = (unit, parse(mel), drums, vol, vib)
         self.song_name = name
-        if name is None:
-            self.song = None
-            return
-        unit, mel, drums, vol, vib = SONGS[name]
-        self.song = (unit, parse(mel), drums, vol, vib)
+        self.song = song
         self.note_i = -1
         self.note_t = 0
         self.unit_count = 0
@@ -185,18 +203,18 @@ class Audio:
     def sfx_play(self, name, prio=1):
         if self.sfx and prio < self.sfx_prio:
             return
-        self.sfx = SFX[name]
-        self.sfx_prio = prio
         self.seg_i = 0
         self.seg_t = 0
+        self.sfx_prio = prio
+        self.sfx = SFX[name]
 
     def sfx_tone(self, f0, f1, frames, duty=1100, prio=1):
         if self.sfx and prio < self.sfx_prio:
             return
-        self.sfx = ((f0, f1, frames, duty, 0),)
-        self.sfx_prio = prio
         self.seg_i = 0
         self.seg_t = 0
+        self.sfx_prio = prio
+        self.sfx = ((f0, f1, frames, duty, 0),)
 
     def chime(self):
         """Rising pentatonic pickup ladder."""
@@ -229,6 +247,9 @@ class Audio:
             self._out(0, 0)
             self._tick_song(False)
             return
+        if self.sfx and self.seg_i >= len(self.sfx):
+            self.sfx = None
+            self.sfx_prio = 0
         if self.sfx:
             f0, f1, n, duty, noise = self.sfx[self.seg_i]
             if noise:

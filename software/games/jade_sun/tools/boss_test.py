@@ -16,12 +16,44 @@ from jade_sun import game as G
 from jade_sun.bosses import Watcher
 from jade_sun.hw import display
 from jade_sun.world import T_GATE, T_SHUT
+from jade_sun.world_data import ROOMS, START_ROOM, START_POS
 
 OUT = Path(__file__).resolve().parent / "out" / "boss"
 GLYPHS = ("g_water", "g_jaguar", "g_sky", "g_stone")
 ABILITIES = ("blade", "pearl", "dash", "feather", "spear")
 SHOTS = []
 RESULTS = []
+
+
+def spot(rid, ch):
+    """Standing position on the first marker ch in room rid."""
+    for r, line in enumerate(ROOMS[rid]["map"]):
+        c = line.find(ch)
+        if c >= 0:
+            return c * 16 + 3, (r + 1) * 16 - 14
+    raise AssertionError("no %s in %s" % (ch, rid))
+
+
+def room_of(ch, key=None, val=None):
+    for rid in sorted(ROOMS):
+        m = ROOMS[rid]
+        if ch in "".join(m["map"]) and (key is None or val in m.get(key, ())):
+            return rid
+    raise AssertionError("no room with %s %s" % (ch, val))
+
+
+OPEN = ".ceZbswmkxfLT"
+
+
+def flat_run(rid, n=9):
+    """Left x and floor y of the first n-tile flat floor with 3 tiles of headroom."""
+    rows = ROOMS[rid]["map"]
+    for r in range(12, 2, -1):
+        for c in range(1, 21 - n):
+            if all(rows[r][k] in OPEN and rows[r - 1][k] in OPEN and rows[r - 2][k] in OPEN
+                   and rows[r + 1][k] in "#%=" for k in range(c, c + n)):
+                return c * 16, (r + 1) * 16
+    raise AssertionError("no flat floor in %s" % rid)
 
 
 def shot(name):
@@ -304,7 +336,7 @@ def run_boss(kind, room, x, y, items, shot_name, reward=None, flags=None, ending
         assert set(range(len(story.ENDING) + 1)) <= seen, sorted(seen)
         return detail + " ending pages %s" % sorted(seen)
     led_before = led_word(0 if reward not in GLYPHS else g.glyphs() - (1 if reward in g.items else 0))
-    assert g.state == G.PLAY, g.state
+    assert g.state in (G.PLAY, G.ITEM), g.state
     glyphs_before = g.glyphs() - (1 if reward in g.items else 0)
     pickup(g, reward, "glyph_item.png" if reward == "g_water" else None)
     assert g.state == G.PLAY, "after B state %s" % g.state
@@ -329,7 +361,7 @@ def check(name, fn):
 
 
 def check_ceiba():
-    g = boot((), "A1", 100, 178)
+    g = boot((), START_ROOM, *START_POS)
     for _ in range(50):
         if g.state == G.DIALOG:
             break
@@ -342,9 +374,11 @@ def check_ceiba():
 
 
 def check_shop():
-    g = boot(("blade",), "A1", 250, 176)
+    rid = room_of("D")
+    x, y = spot(rid, "D")
+    g = boot(("blade",), rid, x, y)
     g.cacao = 80
-    press_at(g, 250, 176, "U")
+    press_at(g, x, y, "U")
     assert g.state == G.DIALOG, "ek did not talk state=%s" % g.state
     for i in range(200):
         if g.state == G.SHOP:
@@ -361,10 +395,12 @@ def check_shop():
 
 
 def check_shrine_continue():
-    g = boot(("blade",), "A1", 160, 176)
+    rid = room_of("P")
+    x, y = spot(rid, "P")
+    g = boot(("blade",), rid, x, y)
     g.cacao = 77
     g.flags["proved"] = 1
-    press_at(g, 160, 176, "U")
+    press_at(g, x, y, "U")
     assert g.state == G.DIALOG, g.state
     assert "remembered" in dialog_text(g)
     path = os.path.join(os.getcwd(), save.PATH)
@@ -372,7 +408,7 @@ def check_shrine_continue():
     data = json.loads(open(path).read())
     assert data["cacao"] == 77, data.get("cacao")
     assert "blade" in data["items"]
-    assert data["room"] == "A1"
+    assert data["room"] == rid
     assert data["flags"].get("proved") == 1
     g.cacao = 0
     g.items.clear()
@@ -381,7 +417,7 @@ def check_shrine_continue():
     assert g.state == G.TITLE and g.has_save and g.title_cursor == 0
     step(g, ("B",))
     assert g.state == G.PLAY, g.state
-    assert g.room.id == "A1", g.room.id
+    assert g.room.id == rid, g.room.id
     assert g.cacao == 77, g.cacao
     assert "blade" in g.items
     assert g.flags.get("proved") == 1
@@ -389,17 +425,21 @@ def check_shrine_continue():
 
 
 def check_chaac():
-    g = boot(("blade",), "B2", 30, 78)
-    press_at(g, 30, 78, "U")
+    rid = room_of("N", "npcs", "chaac")
+    x, y = spot(rid, "N")
+    g = boot(("blade",), rid, x, y)
+    press_at(g, x, y, "U")
     assert g.state == G.DIALOG, "chaac state=%s" % g.state
     drive_grant_dialog(g, "pearl")
     assert "pearl" in g.items
 
 
 def check_balam():
-    g = boot(("blade",), "C4", 240, 34)
+    rid = room_of("N", "npcs", "balam")
+    x, y = spot(rid, "N")
+    g = boot(("blade",), rid, x, y)
     assert isinstance(g.boss, Watcher), type(g.boss)
-    press_at(g, 240, 34, "U")
+    press_at(g, x, y, "U")
     assert g.state == G.DIALOG, g.state
     saw = False
     for i in range(900):
@@ -430,15 +470,28 @@ def check_balam():
 
 
 def check_witz():
-    g = boot(("blade",), "D4", 190, 176)
-    press_at(g, 190, 176, "U")
+    rid = room_of("N", "npcs", "witz")
+    x, y = spot(rid, "N")
+    g = boot(("blade",), rid, x, y)
+    press_at(g, x, y, "U")
     assert g.state == G.DIALOG, g.state
     drive_grant_dialog(g, "spear")
     assert "spear" in g.items
 
 
+def watcher_room():
+    for rid in sorted(ROOMS):
+        if ROOMS[rid].get("watcher") and "Z" in "".join(ROOMS[rid]["map"]) and not ROOMS[rid].get("npcs"):
+            try:
+                return rid, flat_run(rid, 6)
+            except AssertionError:
+                pass
+    raise AssertionError("no Z room with a 6-tile flat floor")
+
+
 def check_watcher_beam():
-    g = boot(("blade", "spear"), "C3", 80, 178)
+    rid, (fx, fy) = watcher_room()
+    g = boot(("blade", "spear"), rid, fx + 3, fy - 14)
     assert isinstance(g.boss, Watcher)
     w = g.boss
     hits = []
@@ -457,15 +510,23 @@ def check_watcher_beam():
                 break
             step(g, (), god=True)
         before = w.hp
-        for _ in range(20):
-            g.player.x, g.player.y = 80.0, 178.0
+        for _ in range(40):
+            if g.player.charge >= 18:
+                break
+            g.player.x, g.player.y = float(fx + 3), float(fy - 14)
             g.player.vx = g.player.vy = 0.0
             g.player.face = 1
-            w.x, w.y = 150.0, 162.0
+            w.x, w.y = float(fx + 70), float(fy - w.h)
             w.vx = w.vy = 0.0
             step(g, ("X",), god=True)
         assert g.player.charge >= 18, g.player.charge
-        step(g, (), god=True)
+        for _ in range(12):
+            g.player.x, g.player.y = float(fx + 3), float(fy - 14)
+            g.player.iframes, g.player.knock_t = 40, 0
+            w.x, w.y = float(fx + 70), float(fy - w.h)
+            step(g, (), god=True)
+            if g.player.charge == 0:
+                break
         assert any(pr.kind == "beam" for pr in g.pprojs) or w.hp < before or w.dying, "no beam"
         for _ in range(40):
             if w.hp < before or w.dying or g.boss is None:
@@ -499,7 +560,8 @@ def check_watcher_beam():
 
 
 def check_watcher_block():
-    g = boot(("blade",), "C4", 200, 178)
+    rid, (fx, fy) = watcher_room()
+    g = boot(("blade",), rid, fx + 3, fy - 14)
     w = g.boss
     assert isinstance(w, Watcher)
     hp = w.hp
@@ -526,13 +588,12 @@ def check_watcher_block():
         return result
 
     w.hit = wrapped
-    # Cols 4-7 of C4's floor are spikes; stand on the rock at col 8+.
     for i in range(10):
-        g.player.x, g.player.y = 130.0, 178.0
+        g.player.x, g.player.y = float(fx + 3), float(fy - 14)
         g.player.face = 1
         g.player.vx = g.player.vy = 0.0
         g.player.atk_cd = 0
-        w.x, w.y = 150.0, 162.0
+        w.x, w.y = float(fx + 23), float(fy - w.h)
         w.vx = 0.0
         step(g, ("Y",) if i == 0 else (), god=True)
     assert w.hp == hp, w.hp
@@ -541,7 +602,8 @@ def check_watcher_block():
 
 
 def check_gate():
-    g = boot(GLYPHS, "A0", 40, 178)
+    from tools.fuzz import spawn_for
+    g = boot(GLYPHS, "A0", *spawn_for(ROOMS["A0"]["map"]))
     assert g.glyphs() == 4
     assert g.pending_gate == 30, g.pending_gate
     assert any(t == T_GATE for t in g.room.t)
@@ -560,12 +622,12 @@ def check_gate():
 def main():
     print("cwd %s" % os.getcwd(), flush=True)
     OUT.mkdir(parents=True, exist_ok=True)
-    check("A1 ceiba_first grants blade then resumes", check_ceiba)
-    check("A1 ek shop purchase", check_shop)
-    check("A1 shrine save and TITLE continue", check_shrine_continue)
-    check("B2 chaac grants pearl", check_chaac)
-    check("C4 balam grants dash and alerts watcher", check_balam)
-    check("D4 witz grants spear", check_witz)
+    check("ceiba_first grants blade then resumes", check_ceiba)
+    check("ek shop purchase", check_shop)
+    check("shrine save and TITLE continue", check_shrine_continue)
+    check("chaac grants pearl", check_chaac)
+    check("balam grants dash and alerts watcher", check_balam)
+    check("witz grants spear", check_witz)
     check("B4 xoc", lambda: run_boss(
         "xoc", "B4", 160, 96, ("blade", "pearl"), "xoc_fight.png", "g_water"))
     check("C2 jaguar", lambda: run_boss(
@@ -576,8 +638,8 @@ def main():
         "camazotz", "E2", 150, 178,
         ABILITIES + GLYPHS, "camazotz_fight.png",
         flags={"gate_open": True}, ending=True))
-    check("C3 watcher charged beam", check_watcher_beam)
-    check("C4 watcher blade blocked and contact", check_watcher_block)
+    check("watcher charged beam", check_watcher_beam)
+    check("watcher blade blocked and contact", check_watcher_block)
     check("A0 four glyphs open the sun gate", check_gate)
     print("---")
     failed = 0

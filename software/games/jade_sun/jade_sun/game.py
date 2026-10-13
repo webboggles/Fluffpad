@@ -1,14 +1,13 @@
 """La-Fluff-Puff and the Jade Sun: game state machine and main loop."""
 import gc
-import math
 import random
 import time
 from . import hw
-from .hw import display, restore_bg, U, D, L, R, BA, BB, BX, BY, PLUS, MINUS, SA, SB, SX
+from .hw import display, restore_bg, U, D, BA, BB, BX, BY, PLUS, MINUS, SA, SB, SX
 from .audio import Audio
 from .world import Room, T_RAIN, T_GATE, T_SEAL, T_WATER, COLS
 from .player import Player, PW, PH, CHARGE_FULL
-from . import gfx, sprites, ui, story, save, combat, intro
+from . import gfx, tiles, sprites, ui, story, save, combat, intro
 from .enemies import Enemy, Lurker, MARKER
 from .bosses import BOSSES, Watcher
 from .fx import FX, AMBIENCE
@@ -22,8 +21,9 @@ BACK = BA | BX | MINUS
 TITLE, PROLOGUE, FORM, PLAY, DIALOG, ITEM, MAP, SHOP, DEATH, ENDING, INTRO = range(11)
 
 ABILITIES = ("blade", "pearl", "dash", "feather", "spear")
-ALL_FINDS = ABILITIES + ("heart1", "heart2", "heart3", "heart4", "l1", "l2", "l3", "l4", "l5", "l6",
-                         "g_water", "g_jaguar", "g_sky", "g_stone", "shop_heart", "shop_edge")
+ALL_FINDS = ABILITIES + ("heart1", "heart2", "heart3", "heart4", "g_water", "g_jaguar", "g_sky", "g_stone",
+                         "shop_heart", "shop_edge") + story.SHARDS + tuple(sorted(story.LORE))
+SAVE_V = 2
 
 
 class Game:
@@ -31,6 +31,7 @@ class Game:
         self.inp = hw.Input()
         self.mood = hw.Mood()
         self.audio = Audio()
+        gfx._pump[0] = self.audio.pump
         self.fx = FX()
         self.t = 0
         self.state = TITLE
@@ -73,12 +74,16 @@ class Game:
     def has(self, k):
         return k in self.items
 
+    def shards(self):
+        return sum(1 for k in story.SHARDS if k in self.items)
+
     def glyphs(self):
         return sum(1 for k in ("g_water", "g_jaguar", "g_sky", "g_stone") if k in self.items)
 
     @property
     def max_hp(self):
         n = 4 + sum(1 for k in ("heart1", "heart2", "heart3", "heart4", "shop_heart") if k in self.items)
+        n += self.shards() // 4
         return n + (self.level >= 3) + (self.level >= 6) + (self.level >= 9)
 
     def attack(self):
@@ -97,7 +102,7 @@ class Game:
 
     def save_game(self):
         data = {
-            "v": 1, "room": self.shrine[0], "x": self.shrine[1], "y": self.shrine[2],
+            "v": SAVE_V, "room": self.shrine[0], "x": self.shrine[1], "y": self.shrine[2],
             "items": list(self.items), "flags": self.flags, "broken": self.broken,
             "visited": list(self.visited), "level": self.level, "xp": self.xp, "cacao": self.cacao,
             "skin": self.skin.idx, "time": self.play_time, "vol": self.audio.vol_index,
@@ -119,8 +124,12 @@ class Game:
         self.cacao = d.get("cacao", 0)
         self.play_time = d.get("time", 0)
         self.skin.set(d.get("skin", 0))
-        self.audio.vol_index = d.get("vol", 2)
+        self.audio.vol_index = d.get("vol", 1)
         self.shrine = (d.get("room", START_ROOM), d.get("x", START_POS[0]), d.get("y", START_POS[1]))
+        if d.get("v") != SAVE_V or self.shrine[0] not in ROOMS:
+            self.shrine = (START_ROOM, START_POS[0], START_POS[1])
+            self.broken = []
+            self.visited = set()
         self.hp = self.max_hp
         return True
 
@@ -294,6 +303,9 @@ class Game:
         self.hp = self.max_hp
         self.inp.set_pad_leds((1 << self.glyphs()) - 1)
         combat.gain_xp(self, 20 if iid.startswith("g_") else 8)
+        if iid in story.SHARDS:
+            n = self.shards() % 4
+            self.fx.text(160, 60, "JADE HEART!" if n == 0 else "SHARD %d OF 4" % n, (120, 255, 170), 70, 2)
 
     def talk(self, key, extra=None):
         lines = list(story.DIALOGUE[key]) if key in story.DIALOGUE else [("stone", story.LORE[key])]
@@ -769,35 +781,17 @@ class Game:
         t = self.t
         rect = display.rectangle
         if self.surfaces:
-            hi = gfx.WATER_HI
-            mid = self.pal.water
-            for sx, sy in self.surfaces:
-                y = sy + gfx.HUD
-                o = int(math.sin(t * 0.12 + sx * 0.09) * 1.5)
-                display.set_pen(mid)
-                rect(sx, y, 16, 2)
-                display.set_pen(hi)
-                rect(sx + ((t // 3 + sx) % 12), y + o, 4, 1)
+            tiles.draw_surfaces(self.surfaces, self.pal, t)
         for tx, ty in self.torches:
-            y = ty + gfx.HUD
-            f = (t + tx) % 6
-            display.set_pen(gfx.ORANGE)
-            display.circle(tx + 8, y + 3, 4 + (f > 3))
-            display.set_pen(gfx.GOLD)
-            display.circle(tx + 8, y + 2 - (f & 1), 2)
+            tiles.draw_flame(tx, ty, t)
         sp = self.shrine_pos
         if sp:
-            r = 3 + ((t >> 3) & 1)
-            display.set_pen(gfx.JADE)
-            display.circle(sp[0] + 8, sp[1] + gfx.HUD + 2, r)
-            display.set_pen(gfx.WHITE)
-            display.pixel(sp[0] + 7, sp[1] + gfx.HUD + 1)
+            tiles.draw_shrine_glow(sp[0], sp[1], t)
             if abs(self.player.cx - sp[0] - 8) < 18:
                 ui.prompt(sp[0] + 8, sp[1] + gfx.HUD - 8, t)
         for lid, lx, ly in self.lores:
-            if not self.has(lid) and (t >> 4) & 1:
-                display.set_pen(gfx.GOLD)
-                display.rectangle(lx + 7, ly + gfx.HUD - 4, 2, 2)
+            if not self.has(lid):
+                tiles.draw_lore_glint(lx, ly, t)
             if abs(self.player.cx - lx - 8) < 16 and abs(self.player.cy - ly - 8) < 20:
                 ui.prompt(lx + 8, ly + gfx.HUD - 6, t)
         for k in self.pickups:
@@ -947,7 +941,7 @@ class Game:
             self.bl_flash -= 1
             if self.bl_flash == 0:
                 display.set_backlight(self.backlight)
-        self.audio.tick()
+        self.audio.pump()
         self.mood.tick()
         self.draw()
         self.t += 1
@@ -957,6 +951,7 @@ class Game:
         ticks_ms, ticks_diff, sleep_ms = time.ticks_ms, time.ticks_diff, time.sleep_ms
         work = 0
         worst = 0
+        self.audio.last_ms = ticks_ms()
         while True:
             t0 = ticks_ms()
             self.frame()

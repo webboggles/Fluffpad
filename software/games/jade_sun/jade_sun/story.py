@@ -1,4 +1,5 @@
-"""All the words. British English, PG."""
+"""All the words. British English, PG. Lore lives with its room in the zone files."""
+from . import world_data
 
 TITLE = "LA-FLUFF-PUFF"
 SUBTITLE = "and the JADE SUN"
@@ -27,7 +28,7 @@ DIALOGUE = {
         ("fluff", "...!"),
         ("ceiba", "Brave face. Good. Take this blade of obsidian. It is older than the mountain, and it likes you."),
         ("!", "give:blade"),
-        ("ceiba", "The cenote lies beneath the canopy to the east. Chaac, the Rain Lord, sleeps in its drowned gallery."),
+        ("ceiba", "The cenote lies beneath the canopy to the east, under Fern Gully. Chaac, the Rain Lord, sleeps in its drowned gallery far to the west."),
         ("ceiba", "And little one... if the water grows dark and something stares back, do not stop moving."),
     ),
     "ek": (
@@ -42,18 +43,18 @@ DIALOGUE = {
         ("chaac", "The rain doors will open for one who carries the storm. Even the sluice beneath the cenote mouth."),
     ),
     "chaac": (
-        ("chaac", "Swim deep, little storm. Xoc waits below the sluice, east of the abyss."),
+        ("chaac", "Swim deep, little storm. Down the Flooded Stair, through the abyss. Xoc coils past the Sunken Ossuary."),
     ),
     "balam_first": (
         ("balam", "So. The little one survived the halls. The Watcher has hunted heroes here for a thousand years."),
         ("balam", "Camazotz stole my shadow and sat it on my throne. Take my speed. Take back my throne."),
         ("!", "give:dash"),
         ("balam", "Cracked stone will shatter before you now. And Fluff-Puff..."),
-        ("balam", "RUN. It has heard us."),
+        ("balam", "RUN. West through the dark, then dash through the old sluice wall. It has heard us."),
         ("!", "watcher"),
     ),
     "balam": (
-        ("balam", "My throne lies past the cracked wall in the Hall of Jaguars. Dash, little one."),
+        ("balam", "My throne lies past the cracked wall of the Calendar Court. Dash, little one."),
     ),
     "witz_first": (
         ("witz", "......"),
@@ -87,14 +88,7 @@ DIALOGUE = {
     ),
 }
 
-LORE = {
-    "l1": "The Hero Twins once played ball with the Lords of Xibalba, and won. The Lords have never forgiven the living.",
-    "l2": "Here the jaguar priests counted the days: thirteen moons, twenty suns and one very long nap.",
-    "l3": "Chaac's thunder was lost in the cenote. Fishermen say the deep serpent wears it as a crown.",
-    "l4": "WARNING: The Watcher does not sleep. The Watcher does not blink. The Watcher REALLY does not like visitors.",
-    "l5": "The quetzal does not fear the sky. Its feathers remember the very first wind.",
-    "l6": "Beyond this road the sun has never risen. Bring your own light, and your bravest fluff.",
-}
+LORE = world_data.LORE
 
 ITEMS = {
     "blade": ("OBSIDIAN BLADE", "Press Y to slash. Hold UP or DOWN for high and pogo strikes."),
@@ -111,12 +105,17 @@ ITEMS = {
     "g_sky": ("GLYPH OF THE SKY", "The third piece of the Jade Sun."),
     "g_stone": ("GLYPH OF STONE", "The final glyph! The Sun Gate awaits at the Great Pyramid."),
 }
+SHARDS = tuple("shard%d" % i for i in range(1, 13))
+for _k in SHARDS:
+    ITEMS[_k] = ("JADE SHARD", "Four shards fuse into a new Jade Heart.")
 
 ITEM_ICON = {
     "blade": "blade", "pearl": "pearl", "dash": "dash", "feather": "feather", "spear": "spear",
     "heart1": "heart", "heart2": "heart", "heart3": "heart", "heart4": "heart",
     "g_water": "glyph", "g_jaguar": "glyph", "g_sky": "glyph", "g_stone": "glyph",
 }
+for _k in SHARDS:
+    ITEM_ICON[_k] = "shard"
 
 BOSS_LINES = {
     "xoc": "Ssss... a morsel with fur. The abyss is HUNGRY.",
@@ -150,19 +149,19 @@ def hint(g):
     if not h("blade"):
         return "Talk to Grandmother Ceiba under the great tree."
     if not h("pearl"):
-        return "Fall into the cenote beneath the canopy, then head west to find Chaac."
+        return "Go east through the Cacao Grove, drop into the cenote at Fern Gully, then head west to the Drowned Gallery."
     if not h("g_water"):
-        return "With the Rain Pearl, open the sluice in the cenote and dive into the abyss."
+        return "With the Rain Pearl, swim down the Flooded Stair into the abyss. Xoc coils past the Sunken Ossuary."
     if not h("dash"):
-        return "The rain door at the temple is open. Seek Balam deep in the Dread Halls. Hide from the Watcher."
+        return "The rain door at the Temple Approach is open. Take the Sunken Stair down to Balam. Hide from the Watcher."
     if not h("g_jaguar"):
-        return "Dash through the cracked wall in the Hall of Jaguars."
+        return "Dash through the cracked wall of the Calendar Court to reach the Jaguar Throne."
     if not h("feather"):
-        return "Dash across the chasm at the Temple Approach and climb the Misty Ascent."
+        return "Dash across the chasm at the Temple Approach, climb the Misty Ascent and search the Wind Caves."
     if not h("g_sky"):
-        return "Use the Quetzal Feather to reach Storm Peak."
+        return "Double jump up the Eagle Cliffs to reach Storm Peak."
     if not h("spear"):
-        return "Witz, the Mountain Spirit, waits at the summit east of Storm Peak."
+        return "Witz, the Mountain Spirit, waits on the summit east of Storm Peak."
     if not h("g_stone"):
         return "Return to the Dread Halls. Charge the Sun Spear and free the Watcher."
-    return "All four glyphs shine! Open the Sun Gate atop the Great Pyramid, west of the village."
+    return "All four glyphs shine! Open the Sun Gate inside the Great Pyramid, west of the village."

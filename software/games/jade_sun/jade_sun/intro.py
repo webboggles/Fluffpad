@@ -1,85 +1,182 @@
 """Boot cinematic and the illustrated prologue."""
 import math
-import random
 from .hw import display, snapshot_bg, restore_bg
-from .gfx import pen, _gradient, _silhouette, WHITE, GOLD, JADE, JADE_D, CREAM, RED, SHADOW
-from . import sprites, ui, story
+from .gfx import pen, _gradient, WHITE, GOLD, JADE, JADE_D, CREAM, RED, SHADOW
+from . import sprites, ui, story, rig
 
 SX, SY = 160, 74
 END = 290
 DROP = 228
 RESTORE = 266
 
+_STONE = pen(46, 62, 52)
+_STONE_LIT = pen(128, 168, 118)
+_STONE_DARK = pen(16, 26, 22)
+_STONE_N = pen(28, 14, 26)
+_STONE_LIT_N = pen(72, 28, 40)
+_STONE_DARK_N = pen(10, 4, 12)
+_TREE = pen(8, 28, 18)
+_TREE_LIT = pen(28, 72, 42)
+_TREE_N = pen(8, 8, 14)
+_TREE_LIT_N = pen(24, 16, 28)
+_GROUND = pen(6, 16, 12)
+_GROUND_N = pen(10, 4, 12)
+_STAR = pen(220, 230, 214)
+_STAR_N = pen(180, 90, 110)
+_RAY = pen(36, 120, 78)
+_RAY_LIT = pen(90, 200, 140)
+_BAT = pen(36, 12, 44)
+_BAT_LIT = pen(96, 42, 108)
+_BAT_DARK = pen(14, 4, 18)
+
+# Pyramid courses: left, right, top, bottom, top inset. Each course is two triangles.
+_COURSES = (
+    (146, 174, 96, 108, 0),
+    (122, 198, 108, 120, 8),
+    (94, 226, 120, 134, 10),
+    (60, 260, 134, 148, 12),
+    (24, 296, 148, 164, 14),
+)
+_TREES = (
+    (0, 36, 108, 160),
+    (22, 64, 124, 166),
+    (254, 298, 120, 166),
+    (282, 320, 104, 160),
+)
+_STARS = (
+    (16, 16, 2), (42, 36, 1), (68, 14, 2), (96, 42, 1),
+    (214, 18, 1), (246, 34, 2), (278, 12, 1), (304, 40, 2),
+    (18, 62, 1), (304, 66, 1), (124, 12, 1), (196, 22, 1),
+)
+
+
+def _dia(x, y, r, lit, dark):
+    display.set_pen(lit)
+    display.triangle(x, y - r, x - r, y, x + r, y)
+    display.set_pen(dark)
+    display.triangle(x - r, y, x + r, y, x, y + r)
+
+
+def _tree(x0, x1, top, base, lit, dark):
+    mid = (x0 + x1) // 2
+    display.set_pen(dark)
+    display.triangle(x0, base, x1, base, mid, top)
+    display.set_pen(lit)
+    span = (base - top) // 3
+    display.triangle(x0 + 6, top + span, x1 - 6, top + span, mid, top)
+
+
+def _slab(x0, x1, y0, y1, inset, mid, lit, dark):
+    tx0 = x0 + inset
+    tx1 = x1 - inset
+    display.set_pen(mid)
+    display.polygon([(x0, y1), (x1, y1), (tx1, y0), (tx0, y0)])
+    display.set_pen(lit)
+    display.triangle(tx0 + 4, y0 + 4, (tx0 + tx1) // 2, y0, tx1 - 4, y0 + 4)
+    display.set_pen(dark)
+    display.triangle(x0 + 6, y1 - 3, (x0 + x1) // 2, y1 - 1, x1 - 6, y1 - 3)
+
 
 def backdrop(dark=False):
-    random.seed(7)
     if dark:
-        _gradient((2, 2, 8), (16, 8, 22), 0, 240, 30)
-        display.set_pen(pen(120, 110, 150))
+        _gradient((4, 2, 10), (28, 8, 18), 0, 240, 30)
+        star, tree, tree_lit = _STAR_N, _TREE_N, _TREE_LIT_N
+        stone, lit, lo = _STONE_N, _STONE_LIT_N, _STONE_DARK_N
+        ground = _GROUND_N
     else:
-        _gradient((4, 6, 20), (20, 50, 46), 0, 240, 30)
-        display.set_pen(pen(220, 255, 230))
-    for _ in range(70):
-        display.pixel(random.randint(0, 319), random.randint(0, 140))
-    display.set_pen(pen(10, 10, 18) if dark else pen(14, 34, 34))
-    for i in range(9):
-        w = 170 - i * 18
-        display.rectangle(160 - w // 2, 210 - i * 11, w, 12)
-    display.rectangle(150, 210 - 9 * 11 - 8, 20, 10)
-    _silhouette((6, 8, 10) if dark else (8, 24, 18), 220, 40, 50)
-    display.set_pen(pen(4, 6, 6) if dark else pen(6, 16, 12))
-    display.rectangle(0, 226, 320, 14)
+        _gradient((6, 10, 26), (16, 48, 46), 0, 240, 30)
+        star, tree, tree_lit = _STAR, _TREE, _TREE_LIT
+        stone, lit, lo = _STONE, _STONE_LIT, _STONE_DARK
+        ground = _GROUND
+    for x, y, r in _STARS:
+        _dia(x, y, r, star, lo)
+    for x0, x1, top, base in _TREES:
+        _tree(x0, x1, top, base, tree_lit, tree)
+    for x0, x1, y0, y1, inset in _COURSES:
+        _slab(x0, x1, y0, y1, inset, stone, lit, lo)
+    if dark:
+        display.set_pen(pen(180, 40, 52))
+        display.line(112, 122, 132, 138)
+        display.line(132, 138, 118, 156)
+    else:
+        _dia(160, 100, 3, pen(214, 255, 232), JADE)
+    display.set_pen(ground)
+    display.polygon([
+        (0, 200), (40, 186), (100, 196), (160, 176), (220, 194),
+        (280, 180), (319, 192), (319, 239), (0, 239),
+    ])
     snapshot_bg()
 
 
 def sun(x, y, t, rays=True):
-    cos, sin = math.cos, math.sin
     if rays:
-        for k in range(12):
-            a = t * 0.02 + k * 0.5236
-            ln = 60 + 10 * sin(t * 0.08 + k)
-            display.set_pen(pen(28, 86, 58) if k & 1 else pen(40, 120, 80))
-            display.triangle(x, y, x + int(ln * cos(a)), y + int(ln * sin(a)),
-                             x + int(ln * cos(a + 0.16)), y + int(ln * sin(a + 0.16)))
-    r = 18 + int(sin(t * 0.05) * 2)
-    display.set_pen(pen(20, 80, 50))
-    display.circle(x, y, r + 8)
-    display.set_pen(JADE_D)
-    display.circle(x, y, r)
-    display.set_pen(JADE)
-    display.circle(x, y, r - 5)
-    display.set_pen(pen(190, 255, 220))
-    display.circle(x - 5, y - 5, 4)
+        pulse = rig.sin64(t)
+        ln = 36 + int(pulse * 5)
+        k = 0
+        while k < 8:
+            a = (int(t) + k * 8) & 63
+            ca = rig.cos64(a)
+            sa = rig.sin64(a)
+            px, py = -sa, ca
+            display.set_pen(_RAY_LIT if sa < 0 else _RAY)
+            display.triangle(
+                x + int(ca * 16), y + int(sa * 16),
+                x + int(ca * ln + px * 4), y + int(sa * ln + py * 4),
+                x + int(ca * ln - px * 4), y + int(sa * ln - py * 4),
+            )
+            k += 1
+    rig.gem(x, y, 14, pen(214, 255, 232), JADE, JADE_D, 8)
 
 
 def broken_sun(x, y, t):
-    display.set_pen(pen(120, 10, 30) if (t >> 3) & 1 else pen(90, 0, 20))
-    display.circle(x, y, 24)
-    display.set_pen(pen(8, 4, 12))
-    display.circle(x, y, 21)
-    display.set_pen(pen(160, 40, 50))
-    for k in range(5):
-        a = k * 1.256 + 0.3
-        display.line(x, y, x + int(20 * math.cos(a)), y + int(20 * math.sin(a)))
+    hot = (t >> 3) & 1
+    display.set_pen(pen(150, 28, 40) if hot else pen(96, 14, 26))
+    rig.ngon(x, y, 26, 8, -1.5708)
+    display.set_pen(pen(12, 4, 16))
+    rig.ngon(x, y, 16, 8, -1.5708)
+    display.set_pen(pen(220, 64, 72))
+    display.line(x - 16, y - 6, x - 2, y + 3)
+    display.line(x - 2, y + 3, x + 8, y - 8)
+    display.line(x + 8, y - 8, x + 18, y + 6)
+    display.set_pen(JADE)
+    display.triangle(x + 16, y - 16, x + 32, y - 4, x + 18, y + 2)
+    display.set_pen(pen(214, 255, 232))
+    display.triangle(x + 18, y - 12, x + 26, y - 6, x + 20, y - 4)
 
 
 def bat(x, y, t, s=1.0):
     x, y = int(x), int(y)
-    f = math.sin(t * 0.55)
-    wy = int(-22 * f * s)
-    body = pen(16, 4, 22)
-    display.set_pen(body)
+    flap = rig.sin64(int(t) * 4)
+    rise = int((-18 + 16 * flap) * s)
+    span = int(54 * s)
+    body = int(7 * s)
     for side in (-1, 1):
-        display.triangle(x + side * int(8 * s), y, x + side * int(56 * s), y + wy, x + side * int(18 * s), y + int(16 * s))
-        display.triangle(x + side * int(56 * s), y + wy, x + side * int(34 * s), y + int(20 * s), x + side * int(18 * s), y + int(16 * s))
-        display.triangle(x + side * int(4 * s), y - int(8 * s), x + side * int(10 * s), y - int(24 * s), x + side * int(12 * s), y - int(6 * s))
-    display.circle(x, y + int(4 * s), int(14 * s))
+        ix = x + side * body
+        tx = x + side * span
+        ty = y + rise
+        lx = x + side * int(20 * s)
+        ly = y + int(14 * s)
+        mx = x + side * int(32 * s)
+        my = y + int(rise * 0.4)
+        display.set_pen(_BAT_DARK)
+        display.triangle(ix, y, tx, ty, lx, ly)
+        display.set_pen(_BAT_LIT if rise < -6 else _BAT)
+        display.triangle(ix, y - int(2 * s), tx, ty, mx, my)
+        display.set_pen(_BAT_LIT)
+        display.line(ix, y, tx, ty)
+        display.triangle(
+            x + side * int(3 * s), y - int(4 * s),
+            x + side * int(8 * s), y - int(2 * s),
+            x + side * int(6 * s), y - int(16 * s),
+        )
+    rig.gem(x, y + int(2 * s), max(4, int(10 * s)), _BAT_LIT, _BAT, _BAT_DARK, 6)
     display.set_pen(RED)
-    display.circle(x - int(5 * s), y + int(2 * s), max(1, int(2 * s)))
-    display.circle(x + int(5 * s), y + int(2 * s), max(1, int(2 * s)))
-    display.set_pen(WHITE)
-    display.triangle(x - int(4 * s), y + int(10 * s), x - int(2 * s), y + int(10 * s), x - int(3 * s), y + int(14 * s))
-    display.triangle(x + int(2 * s), y + int(10 * s), x + int(4 * s), y + int(10 * s), x + int(3 * s), y + int(14 * s))
+    er = max(1, int(2 * s))
+    display.circle(x - int(4 * s), y + int(1 * s), er)
+    display.circle(x + int(4 * s), y + int(1 * s), er)
+    display.set_pen(CREAM)
+    display.triangle(x - int(3 * s), y + int(8 * s), x - int(1 * s), y + int(8 * s), x - int(2 * s), y + int(13 * s))
+    display.triangle(x + int(1 * s), y + int(8 * s), x + int(3 * s), y + int(8 * s), x + int(2 * s), y + int(13 * s))
 
 
 def _ease_out(u):
@@ -257,6 +354,15 @@ def prologue_bake(page):
     backdrop(page >= 3)
 
 
+def _bar():
+    display.set_pen(SHADOW)
+    display.polygon([(0, 5), (14, 0), (306, 0), (319, 5), (306, 12), (14, 12)])
+    display.set_pen(pen(255, 220, 150))
+    display.triangle(20, 3, 90, 1, 160, 3)
+    display.triangle(160, 3, 230, 1, 300, 3)
+    _dia(10, 6, 3, pen(214, 255, 232), JADE)
+
+
 def prologue(g, page, shown, t):
     restore_bg()
     if page == 0:
@@ -289,19 +395,21 @@ def prologue(g, page, shown, t):
     g.fx.draw_screen()
     g.fx.ambience(t)
     s = story.PROLOGUE[page]
-    lines = ui.wrap(s, 280, 2)
-    ui.panel(8, 236 - 18 - len(lines) * 20, 304, len(lines) * 20 + 12)
-    y = 236 - 12 - len(lines) * 20
+    lines = ui.wrap(s, 272, 2)
+    n = len(lines)
+    top = 236 - 24 - n * 18
+    ui.panel(8, top, 304, n * 18 + 20)
+    y = top + 12
     left = int(shown)
     for ln in lines:
         if left <= 0:
             break
         ui.center(ln[:left] if left < len(ln) else ln, y, 2, CREAM)
         left -= len(ln)
-        y += 20
-    display.set_pen(SHADOW)
-    display.rectangle(0, 0, 320, 12)
-    ui.text("B next   + skip", 4, 2, 1, pen(110, 120, 130), False)
+        y += 18
+    _bar()
+    ui.text("B next   + skip", 20, 2, 1, pen(190, 196, 204), False)
     for i in range(len(story.PROLOGUE)):
-        display.set_pen(GOLD if i == page else pen(60, 60, 70))
-        display.rectangle(250 + i * 11, 4, 8, 4)
+        col = GOLD if i == page else pen(70, 68, 80)
+        dark = pen(120, 80, 20) if i == page else pen(36, 34, 44)
+        _dia(248 + i * 11, 6, 2, col, dark)

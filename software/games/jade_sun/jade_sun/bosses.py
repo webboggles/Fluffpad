@@ -1,10 +1,10 @@
 """Bosses and the Stone Watcher. hit() returns 0 blocked, 1 damaged, 2 defeated."""
 import math
 import random
-from .hw import display
 from .world import SOLID, T_PLANK
-from .gfx import pen, HUD, WHITE, BLACK, GOLD, RED, JADE, PURPLE
+from .gfx import WHITE
 from .enemies import EProj, Enemy, overlap
+from . import boss_art
 
 FLOOR = 192
 
@@ -157,28 +157,7 @@ class Xoc(Boss):
         self.trail.pop()
 
     def draw(self, t):
-        body = self.body_pen(pen(40, 120, 110))
-        belly = pen(200, 210, 120)
-        for i in range(47, 0, -6):
-            sx, sy = self.trail[i]
-            r = 7 - i // 12
-            display.set_pen(body)
-            display.circle(int(sx), int(sy) + HUD, r)
-            display.set_pen(belly)
-            display.circle(int(sx), int(sy) + HUD + 2, max(1, r - 4))
-        x, y = int(self.x), int(self.y) + HUD
-        f = self.face
-        display.set_pen(body)
-        display.circle(x, y, 9)
-        display.triangle(x + f * 4, y - 6, x + f * 16, y - 2, x + f * 4, y + 6)
-        display.set_pen(GOLD)
-        display.triangle(x - 6, y - 7, x - 2, y - 15, x + 2, y - 7)
-        display.triangle(x, y - 8, x + 4, y - 16, x + 8, y - 8)
-        display.set_pen(RED if self.state == "tell" else pen(255, 230, 60))
-        display.circle(x + f * 4, y - 3, 2)
-        if self.state in ("lunge", "spit"):
-            display.set_pen(pen(120, 20, 30))
-            display.triangle(x + f * 6, y + 1, x + f * 16, y + 1, x + f * 8, y + 6)
+        boss_art.draw_xoc(self, t)
 
 
 # --- Balam's Shadow ------------------------------------------------------------
@@ -256,33 +235,7 @@ class Jaguar(Boss):
             self._floor()
 
     def draw(self, t):
-        x, y = int(self.x), int(self.y) + HUD
-        f = self.face
-        crouch = 4 if self.state in ("crouch", "dashtell") else 0
-        body = self.body_pen(pen(30, 20, 40))
-        display.set_pen(body)
-        display.rectangle(x + 4, y + 4 + crouch, 22, 10 - crouch)
-        hx = x + (24 if f > 0 else 6)
-        display.circle(hx, y + 5 + crouch, 7)
-        display.triangle(hx - 6, y + crouch, hx - 3, y - 6 + crouch, hx, y + crouch)
-        display.triangle(hx, y + crouch, hx + 3, y - 6 + crouch, hx + 6, y + crouch)
-        step = (t >> 2) & 1 if self.state in ("prowl", "idle", "dash") else 0
-        for lx in (x + 6, x + 22):
-            display.rectangle(lx + step * 2, y + 13, 3, 5)
-        tail = int(math.sin(t * 0.2) * 5)
-        display.line(x + (2 if f > 0 else 28), y + 6, x + (-8 if f > 0 else 38), y + tail)
-        display.set_pen(pen(90, 60, 130))
-        for sx, sy in ((10, 7), (15, 10), (19, 6), (13, 5)):
-            display.circle(x + sx, y + sy + crouch // 2, 1)
-        eye = pen(120, 255, 160) if not (self.state == "crouch" and (t >> 1) & 1) else WHITE
-        display.set_pen(eye)
-        display.rectangle(hx + f * 2, y + 3 + crouch, 2, 2)
-        display.rectangle(hx + f * 5, y + 3 + crouch, 2, 2)
-        if self.state in ("stun", "land"):
-            display.set_pen(GOLD)
-            for k in range(3):
-                a = t * 0.2 + k * 2.1
-                display.pixel(hx + int(8 * math.cos(a)), y - 6 + int(3 * math.sin(a)))
+        boss_art.draw_jaguar(self, t)
 
 
 # --- Ikal the Storm Eagle ----------------------------------------------------------
@@ -360,39 +313,7 @@ class Eagle(Boss):
         self.x = max(0, min(320 - self.w, self.x))
 
     def draw(self, t):
-        x, y = int(self.x), int(self.y) + HUD
-        f = self.face
-        for bx, _ in self.bolts:
-            if self.timer < 34:
-                if (t >> 1) & 1:
-                    display.set_pen(pen(150, 200, 255))
-                    display.rectangle(bx - 1, HUD, 2, 224)
-            else:
-                display.set_pen(WHITE)
-                display.rectangle(bx - 4, HUD, 8, 224)
-                display.set_pen(pen(150, 200, 255))
-                display.rectangle(bx - 7, HUD, 3, 224)
-                display.rectangle(bx + 4, HUD, 3, 224)
-        flap = (t >> 2) & 1 if self.state not in ("dive", "glide") else 0
-        body = self.body_pen(pen(70, 80, 120))
-        display.set_pen(pen(200, 210, 240) if not self.flash else WHITE)
-        if self.state in ("dive", "glide"):
-            display.triangle(x - 4, y + 4, x + 34, y + 4, x + 15, y + 12)
-        elif flap:
-            display.triangle(x + 4, y + 8, x - 10, y - 10, x + 14, y + 6)
-            display.triangle(x + 26, y + 8, x + 40, y - 10, x + 16, y + 6)
-        else:
-            display.triangle(x + 4, y + 6, x - 12, y + 20, x + 14, y + 10)
-            display.triangle(x + 26, y + 6, x + 42, y + 20, x + 16, y + 10)
-        display.set_pen(body)
-        display.circle(x + 15, y + 9, 8)
-        display.triangle(x + 15 - f * 6, y + 12, x + 15 - f * 16, y + 18, x + 15 - f * 4, y + 16)
-        display.set_pen(WHITE)
-        display.circle(x + 15 + f * 6, y + 4, 5)
-        display.set_pen(GOLD)
-        display.triangle(x + 15 + f * 9, y + 3, x + 15 + f * 16, y + 6, x + 15 + f * 9, y + 7)
-        display.set_pen(RED if self.state == "tell" else BLACK)
-        display.circle(x + 15 + f * 7, y + 3, 1)
+        boss_art.draw_eagle(self, t)
 
 
 # --- The Stone Watcher ---------------------------------------------------------------
@@ -506,37 +427,7 @@ class Watcher(Boss):
                 self.go("chase")
 
     def draw(self, t):
-        if self.emerge > 0 and (self.emerge >> 1) & 1:
-            return
-        x, y = int(self.x), int(self.y) + HUD
-        stone = self.body_pen(pen(96, 92, 104))
-        dark = pen(54, 50, 62)
-        step = (t >> 3) & 1 if self.state in ("chase", "patrol") else 0
-        display.set_pen(dark)
-        display.rectangle(x + 2, y + 22 + step, 7, 8 - step)
-        display.rectangle(x + 13, y + 22 + (1 - step), 7, 8 - (1 - step))
-        display.set_pen(stone)
-        display.rectangle(x, y + 8, 22, 16)
-        display.rectangle(x + 3, y, 16, 10)
-        display.set_pen(dark)
-        display.rectangle(x + 3, y + 14, 16, 2)
-        display.rectangle(x - 3, y + 10, 4, 12)
-        display.rectangle(x + 21, y + 10, 4, 12)
-        hunting = self.state in ("alert", "chase", "gloat")
-        eye = RED if hunting else pen(255, 200, 60)
-        if self.state == "stagger" and (t >> 1) & 1:
-            eye = WHITE
-        ex = x + 11 + int((self.face * 3) if hunting else self.eye * 4)
-        display.set_pen(BLACK)
-        display.circle(ex, y + 5, 4)
-        display.set_pen(eye)
-        display.circle(ex, y + 5, 2 if not hunting else 3)
-        if hunting:
-            display.set_pen(pen(120, 0, 0))
-            display.line(ex, y + 5, ex + self.face * 30, y + 5 + int(math.sin(t * 0.3) * 4))
-        for k in range(3 - self.hp):
-            display.set_pen(BLACK)
-            display.line(x + 4 + k * 6, y + 9, x + 8 + k * 6, y + 20)
+        boss_art.draw_watcher(self, t)
 
 
 # --- Camazotz ------------------------------------------------------------------
@@ -626,33 +517,7 @@ class Camazotz(Boss):
         self.x = max(0, min(320 - self.w, self.x))
 
     def draw(self, t):
-        x, y = int(self.x), int(self.y) + HUD
-        flap = (t >> 2) & 1
-        wing = self.body_pen(pen(70, 20, 80))
-        body = self.body_pen(pen(40, 10, 50))
-        display.set_pen(wing)
-        if self.state in ("dive", "glide"):
-            display.triangle(x - 14, y + 6, x + 17, y + 2, x + 6, y + 16)
-            display.triangle(x + 48, y + 6, x + 17, y + 2, x + 28, y + 16)
-        else:
-            wy = -12 if flap else 14
-            display.triangle(x + 8, y + 6, x - 20, y + wy, x + 4, y + 18)
-            display.triangle(x - 20, y + wy, x - 6, y + 20, x + 4, y + 18)
-            display.triangle(x + 26, y + 6, x + 54, y + wy, x + 30, y + 18)
-            display.triangle(x + 54, y + wy, x + 40, y + 20, x + 30, y + 18)
-        display.set_pen(body)
-        display.circle(x + 17, y + 12, 11)
-        display.triangle(x + 8, y + 4, x + 6, y - 12, x + 14, y + 2)
-        display.triangle(x + 26, y + 4, x + 28, y - 12, x + 20, y + 2)
-        display.set_pen(GOLD)
-        display.rectangle(x + 9, y - 2, 16, 3)
-        display.triangle(x + 12, y - 2, x + 17, y - 9, x + 22, y - 2)
-        display.set_pen(JADE if self.phase() < 3 else RED)
-        display.circle(x + 13, y + 9, 2)
-        display.circle(x + 21, y + 9, 2)
-        display.set_pen(WHITE)
-        display.triangle(x + 13, y + 16, x + 15, y + 16, x + 14, y + 20)
-        display.triangle(x + 19, y + 16, x + 21, y + 16, x + 20, y + 20)
+        boss_art.draw_camazotz(self, t)
 
 
 BOSSES = {"xoc": Xoc, "jaguar": Jaguar, "eagle": Eagle, "camazotz": Camazotz}
